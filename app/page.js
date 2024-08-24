@@ -12,13 +12,16 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { firestore } from '@/firebase';
 import { collection, getDocs, query, addDoc, deleteDoc, doc } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useContext } from 'react';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import OpenAI from "openai";
+import { useRouter } from 'next/navigation';
+import { ImageContext } from './context/context';
+
 
 
 export default function Home() {
@@ -28,7 +31,14 @@ export default function Home() {
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [openDialog, setOpenDialog] = useState(false);
+  const router = useRouter();
+  const { image } = useContext(ImageContext);
 
+
+  const openai = new OpenAI({
+    apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
+    dangerouslyAllowBrowser: true, 
+  });
 
 
   const updateMoods = async () => {
@@ -42,6 +52,36 @@ export default function Home() {
     setMoods(moodList)
   }
 
+  const handleAnalyzeImage = async () => {
+    try {
+      setSnackbarMessage('Analyzing image...');
+      setOpenSnackbar(true);
+
+      const response = await fetch('/api/analyzeImage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image_url: image }), 
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPlaylist([data.result]);
+        setSnackbarMessage('Image analyzed successfully!');
+        setOpenDialog(true);
+      } else {
+        setSnackbarMessage('Failed to analyze image.');
+      }
+    } catch (error) {
+      console.error('Error analyzing image:', error);
+      setSnackbarMessage('Failed to analyze image.');
+    } finally {
+      setOpenSnackbar(true);
+    }
+  };
+
+
   useEffect (() => {
 
     updateMoods()
@@ -49,8 +89,15 @@ export default function Home() {
   }, [])
 
 
+  useEffect(() => {
+    if (image) {
+      handleAnalyzeImage();
+    }
+  }, [image]);
+
+
   const handleAddMood = async () => {
-    if (newMood.trim() === '') return; // Prevent adding empty mood
+    if (newMood.trim() === '') return;
 
     try {
       const docRef = await addDoc(collection(firestore, 'moods'), { name: newMood });
@@ -69,37 +116,38 @@ export default function Home() {
   const handleRemoveMood = async (id) => {
     try {
       await deleteDoc(doc(firestore, 'moods', id));
-      setMoods(moods.filter(mood => mood.id !== id)); // Remove mood from UI
+      setMoods(moods.filter(mood => mood.id !== id)); 
     } catch (error) {
       console.error('Error removing document: ', error);
     }
   };
 
-  const openai = new OpenAI({
-    apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
-    dangerouslyAllowBrowser: true, 
-  });
+
 
   const handleGeneratePlaylist = async () => {
     try {
-      const moodNames = moods.map(mood => mood.name).join(', ');
-      const prompt = `Generate a 10-song playlist where each song is a blend of the following moods: ${moodNames}. Provide a mix of genres and styles that reflect these blended moods.`;
+      setSnackbarMessage('Loading...');
+      setOpenSnackbar(true);
   
-      const completion = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [
-          { role: "system", content: "You are a helpful assistant that generates music playlists." },
-          { role: "user", content: prompt },
-        ],
+      const response = await fetch('/api/generatePlaylist', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ moods: moods.map(mood => mood.name) }),
       });
   
-      const generatedPlaylist = completion.choices[0].message.content.trim().split('\n');
-      setPlaylist(generatedPlaylist);
-      setSnackbarMessage('Playlist generated successfully!');
+      if (response.ok) {
+        const data = await response.json();
+        setPlaylist(data.playlist);
+        setSnackbarMessage('Playlist generated successfully!');
+      } else {
+        setSnackbarMessage('Failed to generate playlist.');
+      }
       setOpenSnackbar(true);
       setOpenDialog(true);
     } catch (error) {
-      console.error('Error generating playlist: ', error);
+      console.error('Error generating playlist:', error);
       setSnackbarMessage('Failed to generate playlist.');
       setOpenSnackbar(true);
     }
@@ -107,11 +155,18 @@ export default function Home() {
 
 
 
+  const handleUploadPhoto = () => {
+    router.push('/camera');
+  };
+
+
+
+
 
   return (
     <Box
     width='100vw'
-    height='100vh'
+    minHeight='100vh'
     bgcolor="rgba(255, 255, 255, 0.1)"
     display={'flex'}
     justifyContent={'center'}
@@ -125,7 +180,6 @@ export default function Home() {
           variant="h2" 
           sx={{ 
             textAlign: 'center', 
-            marginBottom: '1px', 
             fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif', 
             fontWeight: 100, 
             fontSize: '6vw', 
@@ -172,7 +226,7 @@ export default function Home() {
 
 
       <Paper
-        elevation={4} // Add elevation for the shadow effect
+        elevation={4}
         sx={{
           width: '80%',
           padding: '20px',
@@ -281,18 +335,57 @@ export default function Home() {
 
       </Paper>
 
-      <Button
-        variant="contained"
-        color="primary"
+      <Box
         sx={{
-          marginTop: '20px',
-          backgroundColor: '#f0f0f0',
-          color: '#000',
+          display: 'flex',
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          width: '80%',
+          marginBottom: '20px'
         }}
-        onClick={handleGeneratePlaylist}
       >
-        Generate Playlist
-      </Button>
+
+         <Button
+          variant="contained"
+          sx={{
+            visibility: 'hidden',
+          }}
+        >
+          Dummy Button
+        </Button>
+
+
+
+        <Button
+          variant="contained"
+          color="primary"
+          sx={{
+            marginTop: '20px',
+            backgroundColor: '#f0f0f0',
+            color: '#000',
+          }}
+          onClick={handleGeneratePlaylist}
+        >
+          Generate Playlist
+        </Button>
+
+        <Button
+          variant="contained"
+          color="secondary"
+          sx={{
+            marginTop: '20px',
+            backgroundColor: '#f0f0f0',
+            color: '#000',
+          }}
+          onClick={handleUploadPhoto}
+        >
+          Upload Photo
+        </Button>
+      </Box>
+
+
+
+
 
 
       <Snackbar
