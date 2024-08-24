@@ -155,7 +155,6 @@ const CameraPage = () => {
         <Wrapper>
             <Camera ref={camera} 
             aspectRatio="cover"
-            facingMode="environment"
             numberOfCamerasCallback={setNumberOfCameras} 
             errorMessages={{
                 noCameraAccessible: 'No camera device accessible. Please connect your camera or try a different browser.',
